@@ -22,27 +22,112 @@ abstract class PhDReader extends XMLReader {
 	const XMLNS_XLINK = "http://www.w3.org/1999/xlinK";
 	const XMLNS_PHD   = "http://www.php.net/ns/phd";
 
-	protected $map = array();
-    protected $STACK = array();
+    protected $stack = array();
 
 	public function __construct( $file, $encoding = "utf-8", $options = NULL ) {
 
 		if ( !parent::open( $file, $encoding, $options ) ) {
 			throw new Exception();
 		}
+		$this->read();
 
 	}
-    
+	
     public function __destruct() {
     }
     
-    /* Format subclasses must implement these to make them real formats. */
+    // ***
+    // Format subclasses must implement these to make them real formats.
+    //  THIS IS THE OFFICIAL OUTPUT FORMAT INTERFACE.
+
+    //  proto string getFormatName( void )
+    //      Return the name of the format.
     abstract public function getFormatName();
-    abstract protected function transformFromMap( $open, $name );
+
+    //  proto string transformNode( string name, int type, string &output )
+    //      Transform a given node, returning the binary string output. Binary
+    //      strings ARE handled safely. This function will be called for all
+    //      element, text, cdata, entity reference, and end element nodes. It
+    //      is always valid for this method to make the parser move around in
+    //      the file. Return TRUE to create a chunk boundary, FALSE otherwise.
+    abstract protected function transformNode( $name, $type, &$output );
     
-    /* These are new functions, extending XMLReader. */
+    // ***
+    // Protected methods (intended for internal and subclass use only)
+
+    // proto array getAllAttributes( void )
+    //  Return all the attributes in the current element node as name:ns =>
+    //  value pairs. Prefer the getAttribute*() methods defined by XMLReader
+    //  when possible; use this only when you really do need all the
+    //  attributes. An element without any attributes will result in an empty
+    //  array, while a non-element node will result in a return of FALSE.
+    protected function getAttributes() {
+        
+        $type = $this->nodeType;
+        if ( $type != XMLReader::ELEMENT && $type != XMLReader::END_ELEMENT ) {
+            return FALSE;
+        }
+        $attrCount = $this->attributeCount;
+        $attrs = array();
+        if ( $attrCount > 0 ) {
+            for ( $i = 0; $i < $attrCount; ++$i ) {
+                $this->moveToAttributeNo( $i );
+                $attrs[ $this->name ] = $this->value;
+            }
+            $this->moveToElement();
+        }
+        return $attrs;
+
+    }
     
-    /* Seek to an ID within the file. */
+    // proto string getID( void )
+    //  Get the ID of the current element. Works on element and end element
+    //  nodes only, returning an empty string in all other cases.
+    protected function getID() {
+
+		if ( $this->hasAttributes && $this->moveToAttributeNs( "id", self::XMLNS_XML ) ) {
+			$id = $this->value;
+			$this->moveToElement();
+			return $id;
+		}
+		return "";
+
+	}
+	
+	// protected void pushStack( mixed value )
+	//  Push a value of any kind onto the parser stack. The stack is not used
+	//  by the parser; it is intended as a cheap data store for formats and
+	//  themes.
+	protected function pushStack( $value ) {
+	    
+	    array_push( $this->stack, $value );
+	
+	}
+	
+	// protected mixed stackTop( void )
+	//  Return the top value on the stack.
+	protected function stackTop() {
+	    
+	    return count( $this->stack ) ? $this->stack[ 0 ] : NULL;
+	
+	}
+	
+	// protected mixed popStack( void )
+	//  Pop the top value off the stack and return it.
+	protected function popStack() {
+	    
+	    return array_pop( $this->stack );
+	
+	}
+    
+    // ***
+    // Public methods
+    
+    // proto bool seek( string id )
+    //  Seek to an ID. This is used to start the parser somewhere that isn't at
+    //  the beginning (duh). Be careful; this does not cause the parser to halt
+    //  at the closing element of a successful seek. Don't forget to check the
+    //  return value.
 	public function seek( $id ) {
 
 		while( parent::read() ) {
@@ -54,6 +139,70 @@ abstract class PhDReader extends XMLReader {
 		return FALSE;
 
 	}
+	
+	// proto string transform( void )
+	//  Transform the whole tree as one giant chunk, IGNORING the output
+	//  format's chunker. Returns the tree, or FALSE on error.
+	public function transform() {
+	    
+	    $allData = '';
+	    while ( ( $data = $this->transformChunk() ) !== FALSE ) {
+            $allData .= $data;
+	    }
+	    return $allData;
+	
+	}
+	
+	// proto bool transformChunk( string &outData )
+	//  Transform nodes until the output format says it's time to output a
+	//  chunking boundary or the parser runs out of data. Returns TRUE on
+	//  success, FALSE on EOF. $data contains the transformed data, if any.
+	public function transformChunk( &$outData ) {
+	    global $OPTIONS;
+
+        $hasMore = TRUE;
+	    $data = fopen( "php://temp/maxmemory:{$OPTIONS[ 'chunking_memory_limit' ]}", "r+" );
+	    $isChunk = FALSE;
+	    do {
+	        $nodeName = $this->name;
+	        $nodeType = $this->nodeType;
+	        switch ( $nodeType ) {
+	            case XMLReader::NONE:
+	                break;
+	                
+                case XMLReader::ELEMENT:
+                case XMLReader::END_ELEMENT:
+                case XMLReader::TEXT:
+                case XMLReader::CDATA:
+                case XMLReader::ENTITY_REF:
+                    $isChunk = $this->transformNode( $nodeName, $nodeType, $output );
+                    fwrite( $data, $output );
+                    break;
+
+                case XMLReader::ENTITY:
+                case XMLReader::PI:
+                case XMLReader::DOC_TYPE:
+                case XMLReader::DOC:
+                case XMLReader::DOC_FRAGMENT:
+                case XMLReader::NOTATION:
+                case XMLReader::WHITESPACE:
+                case XMLReader::SIGNIFICANT_WHITESPACE:
+                case XMLReader::END_ENTITY:
+                case XMLReader::XML_DECLARATION:
+                    // Eat it for lunch.
+                    break;
+            }
+            $hasMore = $this->read();
+        } while ( !$isChunk && $hasMore );
+        
+        rewind( $data );
+        $outData = stream_get_contents( $data );
+        fclose( $data );
+        return $hasMore;
+
+    }
+
+/*
    	public function getID() {
 		if ( $this->hasAttributes && $this->moveToAttributeNs("id", self::XMLNS_XML) ) {
 			$id = $this->value;
@@ -63,7 +212,6 @@ abstract class PhDReader extends XMLReader {
 		return "";
 	}
 
-    /* Go to the next useful node in the file. */
 	public function nextNode() {
 
 		while( $this->read() ) {
@@ -84,14 +232,12 @@ abstract class PhDReader extends XMLReader {
 
 	}
     
-    /* Read a node with the right name? */
 	public function readNode( $nodeName ) {
 
 		return $this->read() && !( $this->nodeType == XMLReader::END_ELEMENT && $this->name == $nodeName );
 
 	}
 
-    /* Get the content of a named node, or the current node. */
 	public function readContent( $node = NULL ) {
 
 		$retval = "";
@@ -106,25 +252,23 @@ abstract class PhDReader extends XMLReader {
 
 	}
     
-    /* Get the attribute value by name, if exists. */
 	public function readAttribute( $attr ) {
 
 		return $this->moveToAttribute( $attr ) ? $this->value : "";
 
 	}
 
-    /* Handle unmapped nodes. */
 	public function __call( $func, $args ) {
 
 		if ( $this->nodeType == XMLReader::END_ELEMENT ) {
-		    /* ignore */ return;
+		    /* ignore * return;
 		}
 		trigger_error( "No mapper for $func", E_USER_WARNING );
 
 		/* NOTE:
 		 *  The _content_ of the element will get processed even though we dont 
 		 *  know how to handle the elment itself
-		*/
+		*
 		return "";
 
 	}
@@ -141,7 +285,6 @@ abstract class PhDReader extends XMLReader {
 		return $tag;
 	}
  
-    /* Perform a transformation. */
 	public function transform() {
 
 		$type = $this->nodeType;
@@ -178,8 +321,8 @@ abstract class PhDReader extends XMLReader {
     		case XMLReader::COMMENT:
     		case XMLReader::WHITESPACE:
     		case XMLReader::SIGNIFICANT_WHITESPACE:
-    			/* swallow it */
-    			/* XXX This could lead to a recursion overflow if a lot of comment nodes get strung together. */
+    			// swallow it
+    			// XXX This could lead to a recursion overflow if a lot of comment nodes get strung together.
     			$this->read();
     			return $this->transform();
 
@@ -189,7 +332,7 @@ abstract class PhDReader extends XMLReader {
 		}
 
     }
-
+*/
 }
 
 /*

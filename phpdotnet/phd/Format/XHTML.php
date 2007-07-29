@@ -20,53 +20,7 @@
 /* Grab the PhDReader parent class. */
 require_once 'include/PhDReader.class.php';
 
-class PhDXHTMLReader extends PhDReader {
-
-	protected $map = array(
-		'application'           => 'span',
-		'classname'             => 'span',
-		'code'                  => 'code',
-		'collab'                => 'span',
-		'collabname'            => 'span',
-		'command'               => 'span',
-		'computeroutput'        => 'span',
-		'constant'              => 'span',
-		'emphasis'              => 'em',
-		'enumname'              => 'span',
-		'envar'                 => 'span',
-		'filename'              => 'span',
-		'glossterm'             => 'span',
-		'holder'                => 'span',
-		'informaltable'         => 'table',
-		'itemizedlist'          => 'ul',
-		'listitem'              => 'li',
-		'literal'               => 'span',
-		'mediaobject'           => 'div',
-		'methodparam'           => 'span',
-		'member'                => 'li',
-		'note'                  => 'div',
-		'option'                => 'span',    
-		'orderedlist'           => 'ol',
-		'para'                  => 'p',
-		'parameter'             => 'span',
-        'partintro'             => 'div',
-		'productname'           => 'span',
-		'propname'              => 'span',
-		'property'              => 'span',
-		'proptype'              => 'span',
-        'section'               => 'div',
-		'simplelist'            => 'ul',
-		'simpara'               => 'p',
-		'title'                 => array(
-			/* DEFAULT */          'h1',
-			'refsect1'          => 'h3',
-			'example'           => 'h4',
-		),
-		'year'                  => 'span',
-	);
-    protected $CURRENT_FUNCTION_ID = "";
-	protected $CURRENT_REFERENCE_ID = "";
-	protected $functionList = array();
+class PhDReader_XHTML extends PhDReader {
 
     public function __construct( $file, $encoding = 'utf-8', $options = NULL ) {
         parent::__construct( $file, $encoding, $options );
@@ -80,51 +34,153 @@ class PhDXHTMLReader extends PhDReader {
         return 'XHTML 1.0 Transitional';
     
     }
+
+    protected function transformNode( $name, $type, &$output ) {
+        
+        switch ( $type ) {
+            
+            case XMLReader::ELEMENT:
+            case XMLReader::END_ELEMENT:
+                return $this->processElement( $name, $type == XMLReader::ELEMENT, $output );
+                break;
+                
+            case XMLReader::TEXT:
+                $output = $this->value;
+                return FALSE;
+                
+            case XMLReader::CDATA:
+                $output = $this->processCDATA( $this->value );
+                return FALSE;
+                
+            case XMLReader::ENTITY_REF:
+                $output = '<div class="error">WARNING: UNRESOLVED ENTITY '.htmlspecialchars( $name ).'</div>';
+                return FALSE;
+        
+        }
     
-	public function format_refentry( $open ) {
+    }
+    
+    protected function processElement( $name, $isOpen, &$output ) {
+        static $handlerMap = NULL;
+        
+        if ( is_null( $handlerMap ) ) {
+            $spanName = array( '<span class="%n%">', FALSE, '</span>', FALSE );
+            $divName = array( '<div class="%n%">', FALSE, '</div>', FALSE );
+            $divNameChunked = array( '<div class="%n%">', FALSE, '</div>', TRUE );
+            $oneToOne = array( '<%n%>', FALSE, '</%n%>', FALSE );
+            
+            $handlerMap = array(
+                'application' => $spanName,
+                'classname' => $spanName,
+                'code' => $oneToOne,
+                'collab' => $spanName,
+                'collabname' => $spanName,
+                'command' => $spanName,
+                'computerOutput' => $spanName,
+                'constant' => $spanName,
+                'emphasis' => $oneToOne,
+                'enumname' => $spanName,
+                'envar' => $spanName,
+                'filename' => $spanName,
+                'glossterm' => $spanName,
+                'holder' => $spanName,
+                'informatlable' => array( '<table>', FALSE, '</table>', FALSE ),
+                'itemizedlist' => array( '<ul>', FALSE, '</ul>', FALSE ),
+                'listitem' => array( '<li>', FALSE, '</li>', FALSE ),
+                'literal' => $spanName,
+                'mediaobject' => $divName,
+                'methodparam' => $spanName,
+                'member' => array( '<li>', FALSE, '</li>', FALSE ),
+                'note' => $divName,
+                'option' => $spanName,
+                'orderedlist' => array( '<ol>', FALSE, '</ol>', FALSE ),
+                'para' => array( '<p>', FALSE, '</p>', FALSE ),
+                'parameter' => $spanName,
+                'partintro' => $divName,
+                'productname' => $spanName,
+                'propname' => $spanName,
+                'property' => $spanName,
+                'proptype' => $spanName,
+                'section' => $divNameChunked,
+                'simplelist' => array( '<ul>', FALSE, '</ul>', FALSE ),
+                'simpara' => array( '<p>', FALSE, '</p>', FALSE ),
+                'title' => array( 'checkparentname', array( '__default' => 'h1', 'refsect1' => 'h3', 'example' => 'h4' ) ),
+                'year' => $spanName,
+                'refentry' => array( '<div id="%i%" class="refentry">', FALSE, '</div>', TRUE, TRUE ),
+                'reference' => array( $this, 'format_reference' ),
+                'function' => array( '<a href="function.%v%.html">', FALSE, '</a>', FALSE ),
+                'refsect1' => array( '<div class="refsect_%r%">', FALSE, '</div>', FALSE ),
+                '__default' => array( $this, 'unknownElement' ),
+            );
+        }
 
-		if ( $open ) {
-			$this->CURRENT_FUNCTION_ID = $id = $this->getID();
+        $mapping = isset( $handlerMap[ $name ] ) ? $handlerMap[ $name ] : $handlerMap[ '__default' ];
+        if ( is_array( $mapping ) ) {
+            if ( is_string( $mapping[ 0 ] ) ) {
+                switch ( $mapping[ 0 ] ) {
+                    case 'checkparentname':
+                        $output = '<div class="warning">NOT IMPLEMENTED YET.</div>';
+                        return FALSE;
+                    default:
+                        $id = $this->getID();
+                        $output = $this->formatMappingString( $name, $id, $isOpen ? $mapping[ 0 ] : $mapping[ 2 ] );
+                        if ( !empty( $mapping[ 4 ] ) ) {
+                            $this->pushStack( $id );
+                        }
+                        return ( $isOpen ? $mapping[ 1 ] : $mapping[ 3 ] );
+                }
+            } else if ( is_callable( $mapping ) ) {
+                return call_user_func( $mapping, $name, $isOpen, &$output );
+            }
+        } else if ( is_string( $mapping ) ) {
+            if ( $isOpen ) {
+                $output = $this->formatMappingString( $name, $this->getID(), $mapping );
+            } else {
+                $output = '';
+            }
+            return FALSE;
+        }
+        $output = '<div class="warning">Bad handler string for '.$name.'!</div>';
+        return FALSE;
 
-			return sprintf( '<div id="%s" class="refentry">', $id );
-		}
-		$this->CURRENT_FUNCTION_ID = "";
-		return "</div>";
-	}
-	public function format_reference( $open ) {
-		if ( $open ) {
-			$this->CURRENT_REFERENCE_ID = $id = $this->getID();
+    }
+    
+    protected function processCDATA( $content ) {
+        
+        return '<div class="phpcode">' . highlight_string( $content ) . '</div>';
+        
+    }
+    
+    protected function formatMappingString( $name, $id, $string ) {
+        
+        // XXX Yes, this needs heavy optimization, it's example for now.
+        return str_replace( array( '%n%', '%i%', '%v%', '%r' ),
+                            array( $name, $id, $this->readInnerXML(), $this->getAttribute( 'role' ) ),
+                            $string );
+    
+    }
+    
+    protected  function format_reference( $name, $isOpen, $output ) {
+        if ( $isOpen ) {
+            $output = sprintf( '<div id="%s" class="reference">', $this->getID() );
+            return FALSE;
+        }
+        $output = '</div>' .
+                  '<ul class="funclist">';
+        foreach ( $this->popStack() as $func => $desc ) {
+            $output .= sptrinf( '<li><a href="function.%1$s.html" class="refentry">%1$s</a></li>', $func );
+        }
+        $output .= '</ul>';
+        return TRUE;
+    }
+    
+    protected function unknownElement( $name, $isOpen, $output ) {
 
-			return sprintf( '<div id="%s" class="reference">', $id );
-
-		}
-		$content  = "</div>";
-		$content .= '<ul class="funclist">';
-		foreach( $this->functionList as $func => $desc ) {
-			$content .= sprintf( '<li><a href="function.%1$s.html" class="refentry">%1$s</a></li>', $func );
-		}
-		$content .= "</ul>\n";
-		$this->CURRENT_REFERENCE_ID = "";
-		$this->functionList = array();
-		return $content;
-
-	}
-
-	public function format_function( $open ) {
-
-		return sprintf( '<a href="function.%1$s.html">%1$s</a>', $this->readContent() );
-
-	}
-
-	public function format_refsect1( $open ) {
-
-		if ( $open ) {
-			return sprintf( '<div class="refsect %s">', $this->readAttribute( "role" ) );
-		}
-		return "</div>\n";
-
-	}
-
+        $output = "Can't handle a {$name}.\n";
+        return FALSE;
+    
+    }
+/*
 	public function format_link( $open ) {
 
 		$this->moveToNextAttribute();
@@ -137,7 +193,7 @@ class PhDXHTMLReader extends PhDReader {
 
 	public function format_methodsynopsis( $open ) {
 
-		/* We read this element to END_ELEMENT so $open is useless */
+		/* We read this element to END_ELEMENT so $open is useless *
 		$content = '<div class="methodsynopsis">';
 		$root = $this->name;
 
@@ -182,56 +238,7 @@ class PhDXHTMLReader extends PhDReader {
 		return sprintf( '<div class="refnamediv"><span class="refname">%s</span><span class="refpurpose">%s</span></div>', $refname, $refpurpose );
 	}
 
-	protected function transormFromMap($open, $tag, $name) {
-
-		$tag = $this->map[ $name ];
-		if($open) {
-			return sprintf( '<%s class="%s">', $tag, $name );
-		}
-		return "</$tag>";
-
-	}
-
-	public function format_listing_hyperlink_function( $matches ) {
-
-		$link = str_replace( '_', '-', $matches[ 1 ] );
-		$link = "function${link}.html";
-		return '<a class="phpfunc" href="'.$link.'">'.$matches[ 1 ].'</a></span>'.$matches[ 2 ];
-
-	}
-
-	public function highlight_php_code( $str ) { /* copy&paste from livedocs */
-
-		if ( is_array( $str ) ) {
-			$str = $str[ 0 ];
-		}
-	
-		$tmp = str_replace(
-			array(
-				'&nbsp;',
-				'<font color="',        // for PHP 4
-				'<span style="color: ', // for PHP 5.0.0RC1
-				'</font>',
-				"\n ",
-				'  '
-			),
-			array(
-				' ',
-				'<span class="',
-				'<span class="',
-				'</span>',
-				"\n&nbsp;",
-				' &nbsp;'
-			),
-			highlight_string( $str, TRUE )
-		);
-	
-		$tmp = preg_replace_callback( '{([\w_]+)\s*</span>(\s*<span\s+class="keyword">\s*\()}m',
-		    array( $this, 'format_listing_hyperlink_function' ), $tmp );
-		return sprintf( '<div class="phpcode">%s</div>', $tmp );
-
-	}
-
+*/
 }
 
 /*
