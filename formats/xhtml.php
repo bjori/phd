@@ -49,16 +49,25 @@ class PhDXHTMLReader extends PhDReader {
 		'orderedlist'           => 'ol',
 		'para'                  => 'p',
 		'parameter'             => 'span',
+        'partintro'             => 'div',
 		'productname'           => 'span',
 		'propname'              => 'span',
 		'property'              => 'span',
 		'proptype'              => 'span',
+        'section'               => 'div',
 		'simplelist'            => 'ul',
 		'simpara'               => 'p',
-		'title'                 => 'h1',
+		'title'                 => array(
+			/* DEFAULT */          'h1',
+			'refsect1'          => 'h3',
+			'example'           => 'h4',
+		),
 		'year'                  => 'span',
 	);
-    
+    protected $CURRENT_FUNCTION_ID = "";
+	protected $CURRENT_REFERENCE_ID = "";
+	protected $functionList = array();
+
     public function __construct( $file, $encoding = 'utf-8', $options = NULL ) {
         parent::__construct( $file, $encoding, $options );
     }
@@ -75,16 +84,29 @@ class PhDXHTMLReader extends PhDReader {
 	public function format_refentry( $open ) {
 
 		if ( $open ) {
-			return '<div>';
-		}
+			$this->CURRENT_FUNCTION_ID = $id = $this->getID();
 
-		echo "</div>";
-		if ( $this->hasAttributes && $this->moveToAttributeNs( "id", "http://www.w3.org/XML/1998/namespace" ) ) {
-			$id = $this->value;
+			return sprintf( '<div id="%s" class="refentry">', $id );
 		}
-		$content = ob_get_contents();
-		ob_clean();
-		file_put_contents( "cache/$id.html", $content );
+		$this->CURRENT_FUNCTION_ID = "";
+		return "</div>";
+	}
+	public function format_reference( $open ) {
+		if ( $open ) {
+			$this->CURRENT_REFERENCE_ID = $id = $this->getID();
+
+			return sprintf( '<div id="%s" class="reference">', $id );
+
+		}
+		$content  = "</div>";
+		$content .= '<ul class="funclist">';
+		foreach( $this->functionList as $func => $desc ) {
+			$content .= sprintf( '<li><a href="function.%1$s.html" class="refentry">%1$s</a></li>', $func );
+		}
+		$content .= "</ul>\n";
+		$this->CURRENT_REFERENCE_ID = "";
+		$this->functionList = array();
+		return $content;
 
 	}
 
@@ -141,8 +163,26 @@ class PhDXHTMLReader extends PhDReader {
 		return $content;
 
 	}
+	public function format_refnamediv( $open ) {
+		$root = $this->name;
 
-	protected function transformFromMap( $open, $name ) {
+		while ( $this->readNode( $root ) ) {
+			$name = $this->name;
+			switch( $name ) {
+    			case "refname":
+	    			$refname = $this->readContent( $name );
+		    		break;
+			    case "refpurpose":
+				    $refpurpose = $this->readContent( $name );
+			    	break;
+			}
+		}
+		
+		$this->functionList[ $refname ] = $refpurpose;
+		return sprintf( '<div class="refnamediv"><span class="refname">%s</span><span class="refpurpose">%s</span></div>', $refname, $refpurpose );
+	}
+
+	protected function transormFromMap($open, $tag, $name) {
 
 		$tag = $this->map[ $name ];
 		if($open) {

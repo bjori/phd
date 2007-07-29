@@ -18,8 +18,12 @@
 */
 
 abstract class PhDReader extends XMLReader {
+	const XMLNS_XML   = "http://www.w3.org/XML/1998/namespace";
+	const XMLNS_XLINK = "http://www.w3.org/1999/xlinK";
+	const XMLNS_PHD   = "http://www.php.net/ns/phd";
 
 	protected $map = array();
+    protected $STACK = array();
 
 	public function __construct( $file, $encoding = "utf-8", $options = NULL ) {
 
@@ -42,15 +46,23 @@ abstract class PhDReader extends XMLReader {
 	public function seek( $id ) {
 
 		while( parent::read() ) {
-			if ( $this->nodeType == XMLREADER::ELEMENT && $this->hasAttributes &&
-			        $this->moveToAttributeNs( "id", "http://www.w3.org/XML/1998/namespace" ) && $this->value == $id ) {
+			if ( $this->nodeType === XMLREADER::ELEMENT && $this->hasAttributes &&
+			        $this->moveToAttributeNs( "id", self::XMLNS_XML ) && $this->value === $id ) {
 				return $this->moveToElement();
 			}
 		}
 		return FALSE;
 
 	}
-    
+   	public function getID() {
+		if ( $this->hasAttributes && $this->moveToAttributeNs("id", self::XMLNS_XML) ) {
+			$id = $this->value;
+			$this->moveToElement();
+			return $id;
+		}
+		return "";
+	}
+
     /* Go to the next useful node in the file. */
 	public function nextNode() {
 
@@ -116,7 +128,19 @@ abstract class PhDReader extends XMLReader {
 		return "";
 
 	}
+	public function notXPath( $tag ) {
+		$depth = $this->depth;
+		do {
+			if ( isset( $tag[ $this->STACK[ --$depth ] ] ) ) {
+				$tag = $tag[ $this->STACK[ $depth ] ];
+			} else {
+				$tag = $tag[0];
+			}
+		} while ( is_array( $tag ) );
 
+		return $tag;
+	}
+ 
     /* Perform a transformation. */
 	public function transform() {
 
@@ -126,11 +150,21 @@ abstract class PhDReader extends XMLReader {
 		switch( $type ) {
 
     		case XMLReader::ELEMENT:
+    			$this->STACK[ $this->depth ] = $name;
+
     		case XMLReader::END_ELEMENT:
-    			if( isset( $this->map[ $name ] ) ) {
-    				return $this->transformFromMap( $type == XMLReader::ELEMENT, $name );
-    			}
-    			return call_user_func( array( $this, "format_${name}" ), $type == XMLReader::ELEMENT );
+    			$funcname = "format_$name";
+ 	    		if ( isset( $this->map[ $name ] ) ) {
+		    		$tag = $this->map[ $name ];
+			    	if ( is_array( $tag ) ) {
+				    	$tag = $this->notXPath( $tag );
+    				}
+	    			if ( strncmp( $tag, "format_", 7 ) ) {
+		    			return $this->transormFromMap( $type == XMLReader::ELEMENT, $tag, $name );
+			    	}
+				    $funcname = $tag;
+     			}
+			    return call_user_func( array( $this, $funcname ), $type == XMLReader::ELEMENT );
     			break;
 
     		case XMLReader::TEXT:
