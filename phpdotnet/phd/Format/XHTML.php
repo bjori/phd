@@ -12,18 +12,76 @@
     | http://phd.php.net/LICENSE                                              |
     +-------------------------------------------------------------------------+
     | The XHTML output format class. This should not be instantiated          |
-    | directly; it is intended for extension by a theme class.                |
-    | XXX This is temporarily untrue for "let's get it started" purposes.     |
+    | directly; it is intended for use only by PHDReader.                     |
     +-------------------------------------------------------------------------+
 */
 
 /* Grab the PhDReader parent class. */
 require_once 'include/PhDReader.class.php';
 
-class PhDReader_XHTML extends PhDReader {
+class PhD_xhtml_Format implements PhD_OutputFormat {
 
-    public function __construct( $file, $encoding = 'utf-8', $options = NULL ) {
-        parent::__construct( $file, $encoding, $options );
+    protected $reader = NULL;
+    protected $handlerMap = array();
+    protected $IDStack = array();
+    protected $nameStack = array();
+    
+    protected function translationSpec( $name ) {
+        return array( "<{$name} class=\"%n%\">", "</{$name}>", FALSE );
+    }
+    
+    public function __construct( $reader ) {
+        
+        $this->reader = $reader;
+        
+        $span = $this->translationSpec( 'span' );
+        $div = $this->translationSpec( 'div' );
+        
+        $this->handlerMap = array(
+            'application' => $span,
+            'classname' => $span,
+            'code' => $this->translationSpec( 'code' ),
+            'collab' => $span,
+            'collabname' => $span,
+            'command' => $span,
+            'computerOutput' => $span,
+            'constant' => $span,
+            'emphasis' => $this->translationSpec( 'em' ),
+            'enumname' => $span,
+            'envar' => $span,
+            'filename' => $span,
+            'glossterm' => $span,
+            'holder' => $span,
+            'informaltable' => $this->translationSpec( 'table' ),
+            'itemizedlist' => $this->translationSpec( 'ul' ),
+            'listitem' => $this->translationSpec( 'li' ),
+            'literal' => $span,
+            'mediaobject' => $div,
+            'methodparam' => $span,
+            'member' => $this->translationSpec( 'li' ),
+            'note' => $div,
+            'option' => $span,
+            'orderedlist' => $this->translationSpec( 'ol' ),
+            'para' => $this->translationSpec( 'p' ),
+            'parameter' => $span,
+            'partintro' => $div,
+            'productname' => $span,
+            'propname' => $span,
+            'property' => $span,
+            'proptype' => $span,
+            'section' => array( '<div class="%n%" id="%i%" xml:id="%i%">', '</div>', TRUE ),
+            'sect1' => array( '%push=i%%push=n%<div class="%n%" id="%i%" xml:id="%i%">', '</div>%pop=n%%pop=i%', TRUE ),
+            'title' => array( '<h1 class="%top=n%"><a name="%top=i%">', '</a></h1>', FALSE ),
+            'simplelist' => $this->translationSpec( 'ul' ),
+            'simpara' => $this->translationSpec( 'p' ),
+            'year' => $span,
+            'refentry' => array( '<div id="%i%">', '</div>', TRUE ),
+            'reference' => $div,
+            'function' => array( '<b>', '</b>', FALSE ),
+            'refsect1' => $div,
+            '__default' => array( $this, 'unknownElement' ),
+        );
+
     }
     
     public function __destruct() {
@@ -35,7 +93,7 @@ class PhDReader_XHTML extends PhDReader {
     
     }
 
-    protected function transformNode( $name, $type, &$output ) {
+    public function transformNode( $name, $type, &$output ) {
         
         switch ( $type ) {
             
@@ -45,11 +103,11 @@ class PhDReader_XHTML extends PhDReader {
                 break;
                 
             case XMLReader::TEXT:
-                $output = $this->value;
+                $output = $this->reader->value;
                 return FALSE;
                 
             case XMLReader::CDATA:
-                $output = $this->processCDATA( $this->value );
+                $output = $this->processCDATA( $this->reader->value );
                 return FALSE;
                 
             case XMLReader::ENTITY_REF:
@@ -61,84 +119,16 @@ class PhDReader_XHTML extends PhDReader {
     }
     
     protected function processElement( $name, $isOpen, &$output ) {
-        static $handlerMap = NULL;
         
-        if ( is_null( $handlerMap ) ) {
-            $spanName = array( '<span class="%n%">', FALSE, '</span>', FALSE );
-            $divName = array( '<div class="%n%">', FALSE, '</div>', FALSE );
-            $divNameChunked = array( '<div class="%n%">', FALSE, '</div>', TRUE );
-            $oneToOne = array( '<%n%>', FALSE, '</%n%>', FALSE );
-            
-            $handlerMap = array(
-                'application' => $spanName,
-                'classname' => $spanName,
-                'code' => $oneToOne,
-                'collab' => $spanName,
-                'collabname' => $spanName,
-                'command' => $spanName,
-                'computerOutput' => $spanName,
-                'constant' => $spanName,
-                'emphasis' => $oneToOne,
-                'enumname' => $spanName,
-                'envar' => $spanName,
-                'filename' => $spanName,
-                'glossterm' => $spanName,
-                'holder' => $spanName,
-                'informatlable' => array( '<table>', FALSE, '</table>', FALSE ),
-                'itemizedlist' => array( '<ul>', FALSE, '</ul>', FALSE ),
-                'listitem' => array( '<li>', FALSE, '</li>', FALSE ),
-                'literal' => $spanName,
-                'mediaobject' => $divName,
-                'methodparam' => $spanName,
-                'member' => array( '<li>', FALSE, '</li>', FALSE ),
-                'note' => $divName,
-                'option' => $spanName,
-                'orderedlist' => array( '<ol>', FALSE, '</ol>', FALSE ),
-                'para' => array( '<p>', FALSE, '</p>', FALSE ),
-                'parameter' => $spanName,
-                'partintro' => $divName,
-                'productname' => $spanName,
-                'propname' => $spanName,
-                'property' => $spanName,
-                'proptype' => $spanName,
-                'section' => $divNameChunked,
-                'simplelist' => array( '<ul>', FALSE, '</ul>', FALSE ),
-                'simpara' => array( '<p>', FALSE, '</p>', FALSE ),
-                'title' => array( 'checkparentname', array( '__default' => 'h1', 'refsect1' => 'h3', 'example' => 'h4' ) ),
-                'year' => $spanName,
-                'refentry' => array( '<div id="%i%" class="refentry">', FALSE, '</div>', TRUE, TRUE ),
-                'reference' => array( $this, 'format_reference' ),
-                'function' => array( '<a href="function.%v%.html">', FALSE, '</a>', FALSE ),
-                'refsect1' => array( '<div class="refsect_%r%">', FALSE, '</div>', FALSE ),
-                '__default' => array( $this, 'unknownElement' ),
-            );
-        }
+        $mapping = isset( $this->handlerMap[ $name ] ) ? $this->handlerMap[ $name ] : $this->handlerMap[ '__default' ];
 
-        $mapping = isset( $handlerMap[ $name ] ) ? $handlerMap[ $name ] : $handlerMap[ '__default' ];
-        if ( is_array( $mapping ) ) {
-            if ( is_string( $mapping[ 0 ] ) ) {
-                switch ( $mapping[ 0 ] ) {
-                    case 'checkparentname':
-                        $output = '<div class="warning">NOT IMPLEMENTED YET.</div>';
-                        return FALSE;
-                    default:
-                        $id = $this->getID();
-                        $output = $this->formatMappingString( $name, $id, $isOpen ? $mapping[ 0 ] : $mapping[ 2 ] );
-                        if ( !empty( $mapping[ 4 ] ) ) {
-                            $this->pushStack( $id );
-                        }
-                        return ( $isOpen ? $mapping[ 1 ] : $mapping[ 3 ] );
-                }
-            } else if ( is_callable( $mapping ) ) {
-                return call_user_func( $mapping, $name, $isOpen, &$output );
-            }
-        } else if ( is_string( $mapping ) ) {
-            if ( $isOpen ) {
-                $output = $this->formatMappingString( $name, $this->getID(), $mapping );
-            } else {
-                $output = '';
-            }
-            return FALSE;
+        if ( is_callable( $mapping ) ) {
+            return call_user_func( $mapping, $name, $isOpen, &$output );
+
+        } else if ( is_array( $mapping ) ) {
+            $output = $this->formatMappingString( $name, $this->reader->getID(), $isOpen ? $mapping[ 0 ] : $mapping[ 1 ] );
+            return ( $isOpen ? FALSE : $mapping[ 2 ] );
+
         }
         $output = '<div class="warning">Bad handler string for '.$name.'!</div>';
         return FALSE;
@@ -147,31 +137,53 @@ class PhDReader_XHTML extends PhDReader {
     
     protected function processCDATA( $content ) {
         
-        return '<div class="phpcode">' . highlight_string( $content ) . '</div>';
+        return "<div>{$content}</div>";
         
     }
+    
+    protected function mappingFormatter( $matches ) {
+
+        if ( empty( $matches[ 1 ] ) ) {
+            if ( $matches[ 4 ] == 'n' ) {
+                return $this->_mapping_name;
+            } else if ( $matches[ 4 ] == 'i' ) {
+                return $this->_mapping_id;
+            }
+        } else {
+            if ( $matches[ 3 ] == 'n' ) {
+                $a = &$this->nameStack;
+                $v = $this->_mapping_name;
+            } else if ( $matches[ 3 ] == 'i' ) {
+                $a = &$this->IDStack;
+                $v = $this->_mapping_id;
+            }
+            
+            if ( $matches[ 2 ] == 'push' ) {
+                array_push( $a, $v );
+                return '';
+            } else if ( $matches[ 2 ] == 'pop' ) {
+                array_pop( $a );
+                return '';
+            } else if ( $matches[ 2 ] == 'top' ) {
+                return $a[ 0 ];
+            }
+        }
+        return 'INVALID MAPPING DATA:' . var_export($matches,1);
+
+    }
+        
     
     protected function formatMappingString( $name, $id, $string ) {
         
-        // XXX Yes, this needs heavy optimization, it's example for now.
-        return str_replace( array( '%n%', '%i%', '%v%', '%r' ),
-                            array( $name, $id, $this->readInnerXML(), $this->getAttribute( 'role' ) ),
-                            $string );
+        $sc = 'ni'; // sc == stack chars
+        $fc = 'ni'; // fc == formatted chars
+        $this->_mapping_name = $name;
+        $this->_mapping_id = $id;
+        $s = preg_replace_callback( "/%(?:((push|pop|top)=([{$sc}]))|([{$fc}]))%/", array( $this, 'mappingFormatter' ), $string );
+        unset( $this->_mapping_name );
+        unset( $this->_mapping_id );
+        return $s;
     
-    }
-    
-    protected  function format_reference( $name, $isOpen, $output ) {
-        if ( $isOpen ) {
-            $output = sprintf( '<div id="%s" class="reference">', $this->getID() );
-            return FALSE;
-        }
-        $output = '</div>' .
-                  '<ul class="funclist">';
-        foreach ( $this->popStack() as $func => $desc ) {
-            $output .= sptrinf( '<li><a href="function.%1$s.html" class="refentry">%1$s</a></li>', $func );
-        }
-        $output .= '</ul>';
-        return TRUE;
     }
     
     protected function unknownElement( $name, $isOpen, $output ) {
