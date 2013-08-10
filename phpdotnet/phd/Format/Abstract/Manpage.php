@@ -7,9 +7,9 @@ abstract class Format_Abstract_Manpage extends Format {
 
     public function UNDEF($open, $name, $attrs, $props) {
         if ($open) {
-            trigger_error("No mapper found for '{$name}'", E_USER_WARNING);
+            //trigger_error("No mapper found for '{$name}'", E_USER_WARNING);
         }
-        return "\n.B [NOT PROCESSED] $name [/NOT PROCESSED]";
+        return ""; //\n.B [NOT PROCESSED] $name [/NOT PROCESSED]";
     }
 
     public function CDATA($str) {
@@ -38,12 +38,13 @@ abstract class Format_Abstract_Manpage extends Format {
         $isMacro = $tag[0] == ".";
 
         if ($open) {
+            return "\n" . $tag . ": ";
+            return $tag;
 
             if ($isMacro && strpos($tag, "\n") === false) {
-                return "\n" . $tag . "\n";
             }
-            return "\n" . $tag;
         }
+        return "\n";
 
         return ($isMacro ? "" : "\\fP");
     }

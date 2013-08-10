@@ -55,9 +55,7 @@ class Highlighter
     public function highlight($text, $role, $format)
     {
         if ($format == 'troff') {
-            return "\n.PP\n.nf\n"
-                . str_replace("\\", "\\\\", trim($text))
-                . "\n.fi";
+            return "``$role\n" . $text . "\n``\n";
         } else if ($format != 'xhtml') {
             return $text;
         }
